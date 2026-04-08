@@ -1,11 +1,6 @@
 # news_server.py
-# MCP Server - Berita Terbaru dari Kompas.com & Antara
-# Untuk XiaoZhi ESP32
-#
-# Cara jalankan:
-#   pip install -r requirements.txt
-#   export MCP_ENDPOINT=wss://api.xiaozhi.me/mcp/?token=...
-#   python mcp_pipe.py news_server.py
+# MCP Server - Berita Indonesia (Stabil + Fallback)
+# Source: CNN Indonesia (utama) + Antara (fallback)
 
 from mcp.server.fastmcp import FastMCP
 import urllib.request
@@ -16,94 +11,115 @@ logger = logging.getLogger("news_mcp")
 
 mcp = FastMCP("BeritaIndonesia")
 
-# ─── RSS Feed URLs ────────────────────────────────────────────────────────────
+# ─── RSS Feed URLs (STABIL) ────────────────────────────────────────────────
 FEEDS = {
-    "nasional":      "https://www.antaranews.com/rss/nasional.xml",
-    "internasional": "https://www.antaranews.com/rss/internasional.xml",
-    "bisnis":        "https://www.antaranews.com/rss/ekonomi.xml",
-    "teknologi":     "https://www.antaranews.com/rss/tekno.xml",
-    "olahraga":      "https://www.antaranews.com/rss/olahraga.xml",
-    "terkini":       "https://www.antaranews.com/rss/terkini.xml",
+    "nasional": [
+        "https://rss.cnnindonesia.com/nasional",
+        "https://www.antaranews.com/rss/terkini"
+    ],
+    "internasional": [
+        "https://rss.cnnindonesia.com/internasional"
+    ],
+    "bisnis": [
+        "https://rss.cnnindonesia.com/ekonomi"
+    ],
+    "teknologi": [
+        "https://rss.cnnindonesia.com/teknologi"
+    ],
+    "olahraga": [
+        "https://rss.cnnindonesia.com/olahraga"
+    ],
+    "terkini": [
+        "https://rss.cnnindonesia.com/nasional"
+    ],
 }
 
+# ─── FETCH RSS ─────────────────────────────────────────────────────────────
 def fetch_rss(url: str) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "XiaoZhiNewsBot/1.0"}
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return resp.read().decode("utf-8", errors="ignore")
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.warning(f"Gagal fetch {url}: {e}")
+        return ""
 
-def parse_rss(xml: str, max_items: int = 5) -> list[dict]:
+# ─── PARSE RSS ─────────────────────────────────────────────────────────────
+def parse_rss(xml: str, max_items: int = 5):
     items = []
     for block in re.findall(r"<item>(.*?)</item>", xml, re.DOTALL):
         if len(items) >= max_items:
             break
+
         title = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", block)
         desc  = re.search(r"<description>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</description>", block, re.DOTALL)
-        pub   = re.search(r"<pubDate>(.*?)</pubDate>", block)
+
         if title:
             desc_text = ""
             if desc:
                 desc_text = re.sub(r"<[^>]+>", "", desc.group(1)).strip()
-                desc_text = desc_text[:180]
+                desc_text = desc_text[:160]
+
             items.append({
                 "title": title.group(1).strip(),
-                "description": desc_text,
-                "date": pub.group(1).strip() if pub else "",
+                "description": desc_text
             })
+
     return items
 
-
+# ─── MCP TOOL ─────────────────────────────────────────────────────────────
 @mcp.tool()
-def get_latest_news(
-    category: str = "nasional",
-    jumlah: int = 5
-) -> dict:
+def get_latest_news(category: str = "nasional", jumlah: int = 5) -> dict:
     """
-    Ambil berita terbaru dari Kompas.com atau Antara News.
-    Gunakan tool ini setiap kali pengguna bertanya tentang berita terkini,
-    kabar hari ini, kejadian terbaru, atau informasi aktual.
+    Ambil berita terbaru dari Indonesia.
+    Gunakan tool ini saat user bertanya tentang berita, kabar terkini, atau informasi terbaru.
 
     Parameter:
-    - category: kategori berita. Pilihan: nasional, internasional, bisnis,
-                teknologi, olahraga, terkini (Antara). Default: nasional.
-    - jumlah: berapa berita yang ingin ditampilkan (1-10). Default: 5.
-
-    Contoh: jika pengguna bilang "ada berita apa hari ini?", gunakan category=nasional.
-    Jika tanya "berita teknologi terbaru?", gunakan category=teknologi.
+    - category: nasional, internasional, bisnis, teknologi, olahraga, terkini
+    - jumlah: jumlah berita (1-10)
     """
+
     cat = category.lower().strip()
     if cat not in FEEDS:
         cat = "nasional"
 
     count = max(1, min(int(jumlah), 10))
-    url = FEEDS[cat]
+    urls = FEEDS[cat]
 
-    logger.info(f"Fetching news: category={cat}, count={count}, url={url}")
+    logger.info(f"Fetching news: {cat}, count={count}")
 
-    try:
+    xml = ""
+    for url in urls:
         xml = fetch_rss(url)
-        items = parse_rss(xml, count)
+        if xml:
+            logger.info(f"Berhasil ambil dari {url}")
+            break
 
-        if not items:
-            return {"success": False, "result": "Tidak ada berita ditemukan."}
+    if not xml:
+        return {"success": False, "result": "Gagal mengambil berita (semua sumber error)."}
 
-        sumber = "Antara News" if cat == "terkini" else "Kompas.com"
-        lines = [f"Berita {cat.upper()} terbaru dari {sumber}:"]
-        for i, item in enumerate(items, 1):
-            lines.append(f"\n{i}. {item['title']}")
-            if item["description"]:
-                lines.append(f"   {item['description']}")
+    items = parse_rss(xml, count)
 
-        result_text = "\n".join(lines)
-        logger.info(f"Returning {len(items)} news items ({len(result_text)} chars)")
-        return {"success": True, "result": result_text}
+    if not items:
+        return {"success": False, "result": "Tidak ada berita ditemukan."}
 
-    except Exception as e:
-        logger.error(f"Error fetching news: {e}")
-        return {"success": False, "result": f"Gagal mengambil berita: {str(e)}"}
+    # ─── FORMAT OUTPUT (ENAK DIBACA VOICE) ───────────────────────────────
+    lines = [f"Berita {cat.upper()} hari ini:"]
+
+    for i, item in enumerate(items, 1):
+        lines.append(f"{i}. {item['title']}")
+        if item["description"]:
+            lines.append(f"   {item['description']}")
+
+    result_text = "\n".join(lines)
+
+    logger.info(f"Return {len(items)} berita")
+    return {"success": True, "result": result_text}
 
 
+# ─── RUN SERVER ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     mcp.run(transport="stdio")
