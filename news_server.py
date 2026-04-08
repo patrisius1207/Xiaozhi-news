@@ -1,6 +1,5 @@
 # news_server.py
-# MCP Server - Berita Indonesia (Stabil + Fallback)
-# Source: CNN Indonesia (utama) + Antara (fallback)
+# MCP Server - Google News Indonesia (STABIL)
 
 from mcp.server.fastmcp import FastMCP
 import urllib.request
@@ -9,32 +8,19 @@ import logging
 
 logger = logging.getLogger("news_mcp")
 
-mcp = FastMCP("BeritaIndonesia")
+mcp = FastMCP("GoogleNewsIndonesia")
 
-# ─── RSS Feed URLs (STABIL) ────────────────────────────────────────────────
+# ─── GOOGLE NEWS RSS ─────────────────────────────────────────────
 FEEDS = {
-    "nasional": [
-        "https://rss.cnnindonesia.com/nasional",
-        "https://www.antaranews.com/rss/terkini"
-    ],
-    "internasional": [
-        "https://rss.cnnindonesia.com/internasional"
-    ],
-    "bisnis": [
-        "https://rss.cnnindonesia.com/ekonomi"
-    ],
-    "teknologi": [
-        "https://rss.cnnindonesia.com/teknologi"
-    ],
-    "olahraga": [
-        "https://rss.cnnindonesia.com/olahraga"
-    ],
-    "terkini": [
-        "https://rss.cnnindonesia.com/nasional"
-    ],
+    "terkini": "https://news.google.com/rss?hl=id&gl=ID&ceid=ID:id",
+    "nasional": "https://news.google.com/rss/search?q=indonesia&hl=id&gl=ID&ceid=ID:id",
+    "teknologi": "https://news.google.com/rss/search?q=teknologi&hl=id&gl=ID&ceid=ID:id",
+    "bisnis": "https://news.google.com/rss/search?q=bisnis&hl=id&gl=ID&ceid=ID:id",
+    "olahraga": "https://news.google.com/rss/search?q=olahraga&hl=id&gl=ID&ceid=ID:id",
+    "internasional": "https://news.google.com/rss/search?q=internasional&hl=id&gl=ID&ceid=ID:id",
 }
 
-# ─── FETCH RSS ─────────────────────────────────────────────────────────────
+# ─── FETCH ──────────────────────────────────────────────────────
 def fetch_rss(url: str) -> str:
     try:
         req = urllib.request.Request(
@@ -44,82 +30,67 @@ def fetch_rss(url: str) -> str:
         with urllib.request.urlopen(req, timeout=8) as resp:
             return resp.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        logger.warning(f"Gagal fetch {url}: {e}")
+        logger.error(f"Fetch error: {e}")
         return ""
 
-# ─── PARSE RSS ─────────────────────────────────────────────────────────────
+# ─── PARSE ──────────────────────────────────────────────────────
 def parse_rss(xml: str, max_items: int = 5):
     items = []
+
     for block in re.findall(r"<item>(.*?)</item>", xml, re.DOTALL):
         if len(items) >= max_items:
             break
 
-        title = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", block)
-        desc  = re.search(r"<description>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</description>", block, re.DOTALL)
+        title = re.search(r"<title>(.*?)</title>", block)
+        source = re.search(r"<source.*?>(.*?)</source>", block)
 
         if title:
-            desc_text = ""
-            if desc:
-                desc_text = re.sub(r"<[^>]+>", "", desc.group(1)).strip()
-                desc_text = desc_text[:160]
-
             items.append({
                 "title": title.group(1).strip(),
-                "description": desc_text
+                "source": source.group(1).strip() if source else ""
             })
 
     return items
 
-# ─── MCP TOOL ─────────────────────────────────────────────────────────────
+# ─── TOOL ───────────────────────────────────────────────────────
 @mcp.tool()
-def get_latest_news(category: str = "nasional", jumlah: int = 5) -> dict:
+def get_latest_news(category: str = "terkini", jumlah: int = 5) -> dict:
     """
-    Ambil berita terbaru dari Indonesia.
-    Gunakan tool ini saat user bertanya tentang berita, kabar terkini, atau informasi terbaru.
-
-    Parameter:
-    - category: nasional, internasional, bisnis, teknologi, olahraga, terkini
-    - jumlah: jumlah berita (1-10)
+    Ambil berita terbaru dari Google News Indonesia.
+    Gunakan saat user bertanya tentang berita, kabar terbaru, atau topik tertentu.
     """
 
     cat = category.lower().strip()
     if cat not in FEEDS:
-        cat = "nasional"
+        cat = "terkini"
 
     count = max(1, min(int(jumlah), 10))
-    urls = FEEDS[cat]
+    url = FEEDS[cat]
 
-    logger.info(f"Fetching news: {cat}, count={count}")
+    logger.info(f"Fetching Google News: {cat}")
 
-    xml = ""
-    for url in urls:
-        xml = fetch_rss(url)
-        if xml:
-            logger.info(f"Berhasil ambil dari {url}")
-            break
-
+    xml = fetch_rss(url)
     if not xml:
-        return {"success": False, "result": "Gagal mengambil berita (semua sumber error)."}
+        return {"success": False, "result": "Gagal mengambil berita."}
 
     items = parse_rss(xml, count)
 
     if not items:
         return {"success": False, "result": "Tidak ada berita ditemukan."}
 
-    # ─── FORMAT OUTPUT (ENAK DIBACA VOICE) ───────────────────────────────
-    lines = [f"Berita {cat.upper()} hari ini:"]
+    # ─── FORMAT OUTPUT (VOICE FRIENDLY) ─────────────────────────
+    lines = [f"Berita {cat.upper()} terbaru dari Google News:"]
 
     for i, item in enumerate(items, 1):
-        lines.append(f"{i}. {item['title']}")
-        if item["description"]:
-            lines.append(f"   {item['description']}")
+        if item["source"]:
+            lines.append(f"{i}. {item['title']} ({item['source']})")
+        else:
+            lines.append(f"{i}. {item['title']}")
 
     result_text = "\n".join(lines)
 
-    logger.info(f"Return {len(items)} berita")
     return {"success": True, "result": result_text}
 
 
-# ─── RUN SERVER ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     mcp.run(transport="stdio")
