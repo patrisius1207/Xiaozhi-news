@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "news": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["news_server.py"]
+    }
+  }
+}
