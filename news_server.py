@@ -18,11 +18,11 @@ mcp = FastMCP("BeritaIndonesia")
 
 # ─── RSS Feed URLs ────────────────────────────────────────────────────────────
 FEEDS = {
-    "nasional":      "https://www.kompas.com/getrss/nasional",
-    "internasional": "https://www.kompas.com/getrss/internasional",
-    "bisnis":        "https://www.kompas.com/getrss/bisniskeuangan",
-    "teknologi":     "https://www.kompas.com/getrss/tekno",
-    "olahraga":      "https://www.kompas.com/getrss/olahraga",
+    "nasional":      "https://www.antaranews.com/rss/nasional.xml",
+    "internasional": "https://www.antaranews.com/rss/internasional.xml",
+    "bisnis":        "https://www.antaranews.com/rss/ekonomi.xml",
+    "teknologi":     "https://www.antaranews.com/rss/tekno.xml",
+    "olahraga":      "https://www.antaranews.com/rss/olahraga.xml",
     "terkini":       "https://www.antaranews.com/rss/terkini.xml",
 }
 
